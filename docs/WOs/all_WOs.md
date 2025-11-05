@@ -2,7 +2,7 @@
 
 Each WO stands alone, produces shippable code, and has acceptance checks against real ARC JSON. No future dependency stubs. Order is buildable straight through.
 
-### WO-01 — ARC loader (Π inputs)
+### WO-01 — ARC loader (Π inputs) ✅ COMPLETE
 
 **Goal:** Parse one ARC task JSON reliably.
 **File:** `io/arc_loader.py`
