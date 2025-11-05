@@ -1,0 +1,44 @@
+{
+  "env": {
+    "BASH_MAX_OUTPUT_LENGTH": "200000",
+    "MAX_THINKING_TOKENS": "20000"
+  },
+  "permissions": {
+    "allow": [
+      "Bash",
+      "Bash(python:*)",
+      "Bash(pip:*)",
+      "Bash(npm:*)",
+      "Bash(test:*)",
+      "Bash(source:*)",
+      "Bash(tree:*)",
+      "Bash(cat:*)",
+      "Bash(ls:*)",
+      "Bash(rm -rf /tmp/**)",
+      "WebSearch",
+      "WebFetch",
+      "Read",
+      "Write",
+      "Edit",
+      "Glob",
+      "Grep"
+    ],
+    "deny": [],
+    "ask": [
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(git merge:*)",
+      "Bash(git rebase:*)",
+      "Bash(git reset:*)",
+      "Bash(git checkout:*)",
+      "Bash(git branch -D:*)",
+      "Bash(git branch -d:*)",
+      "Bash(git stash drop:*)",
+      "Bash(git clean:*)",
+      "Bash(rm -rf:*)",
+      "Bash(rm -r:*)",
+      "Bash(rm -f:*)"
+    ]
+  }
+}
