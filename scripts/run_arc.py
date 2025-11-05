@@ -103,6 +103,14 @@ def print_receipt_summary(result: TaskResult) -> None:
                 print(f"    Train/Test: {details.get('train_count')}/{details.get('test_count')}")
                 palette = details.get('palette_proof', {}).get('normalized_palette', [])
                 print(f"    Palette: {palette}")
+            elif receipt.stage == "02_canonicalize_pose":
+                details = receipt.details
+                print(f"    Π-idempotent: {details.get('pi_idempotent', 'N/A')}")
+                print(f"    Orbit collapse: {details.get('orbit_collapse_ok', 'N/A')}")
+                print(f"    Grids canonicalized: {details.get('num_grids', 0)}")
+                palette_map = details.get('palette_map', {})
+                if palette_map:
+                    print(f"    Palette map: {palette_map}")
 
 
 def main():
@@ -263,6 +271,7 @@ def main():
                                     "status": rec.status,
                                     "time_s": rec.time_s,
                                     "error": rec.error,
+                                    "details": rec.details,
                                 }
                                 for rec in r.receipts
                             ]

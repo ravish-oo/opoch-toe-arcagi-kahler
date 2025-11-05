@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Literal, Optional
 import numpy as np
 
 from arc_cloth.io.arc_loader import Grid, Task, TaskMetadata, load_task
+from arc_cloth.io.canonicalize import canonicalize_task, CanonicalTask
 
 
 @dataclass
@@ -117,27 +118,73 @@ def _stage_01_load(path: Path) -> tuple[StageReceipt, Optional[Task], Optional[T
 
 def _stage_02_canonicalize_pose(
     task: Task, metadata: TaskMetadata
-) -> tuple[StageReceipt, Optional[Task]]:
+) -> tuple[StageReceipt, Optional[CanonicalTask]]:
     """
-    Stage 2: D4 pose canonicalization (WO-02, stub for now).
+    Stage 2: D4 pose canonicalization (WO-02).
 
     Returns (receipt, canonicalized_task).
     """
     t0 = time.time()
 
-    # TODO (WO-02): Apply D4 canonical pose selection
-    # - Choose lexicographic min over D4 orbit
-    # - Verify D4-invariance of resulting task
-    # - Print FREE receipt
+    try:
+        # Apply D4 canonical pose selection and palette remapping
+        canonical_task = canonicalize_task(task)
 
-    receipt = StageReceipt(
-        stage="02_canonicalize_pose",
-        status="skip",
-        time_s=time.time() - t0,
-        details={"reason": "WO-02 not yet implemented"},
-    )
+        # Extract receipts from canonicalization
+        canon_meta = canonical_task.get("__meta__", {})
 
-    return receipt, task
+        details = {
+            "pi_idempotent": canon_meta.get("pi_idempotent", False),
+            "orbit_collapse_ok": canon_meta.get("orbit_collapse_ok", False),
+            "chosen_pose": canon_meta.get("chosen_pose", {}),
+            "palette_map": canon_meta.get("palette_map", {}),
+            "num_grids": len(canon_meta.get("chosen_pose", {})),
+        }
+
+        # Verify receipts
+        if not canon_meta.get("pi_idempotent", False):
+            return (
+                StageReceipt(
+                    stage="02_canonicalize_pose",
+                    status="error",
+                    time_s=time.time() - t0,
+                    error="Π-idempotence failed for canonical task",
+                    details=details,
+                ),
+                None,
+            )
+
+        if not canon_meta.get("orbit_collapse_ok", False):
+            return (
+                StageReceipt(
+                    stage="02_canonicalize_pose",
+                    status="error",
+                    time_s=time.time() - t0,
+                    error="D4 orbit collapse failed",
+                    details=details,
+                ),
+                None,
+            )
+
+        receipt = StageReceipt(
+            stage="02_canonicalize_pose",
+            status="ok",
+            time_s=time.time() - t0,
+            details=details,
+        )
+
+        return receipt, canonical_task
+
+    except Exception as e:
+        return (
+            StageReceipt(
+                stage="02_canonicalize_pose",
+                status="error",
+                time_s=time.time() - t0,
+                error=f"{type(e).__name__}: {e}",
+            ),
+            None,
+        )
 
 
 def _stage_03_infer_invariants(
