@@ -1,19 +1,21 @@
 """
 Invariant extraction from train pairs (WO-03+).
 
-Implements color counts and FREE-invariance verification.
+Implements color counts and period detection via autocorrelation.
 Reuses D4/D2 transforms from canonicalize.py for verification.
 
 Spec: docs/anchors/01-arc-on-the-cloth.md (§4–5)
+      docs/anchors/03-invariants-catalog-v1.md (§2)
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Optional
 
 import numpy as np
+from scipy.signal import correlate  # Production-grade autocorrelation backend
 
 # Reuse production-grade D4/D2 transforms from canonicalize module
 from arc_cloth.io.canonicalize import D4, D2_INDICES
@@ -192,3 +194,207 @@ def infer_color_counts(
     result["__meta__"] = receipts
 
     return result
+
+
+# ============================================================================
+# WO-04: Period Detection via Autocorrelation
+# ============================================================================
+
+
+def _row_periods(G: np.ndarray) -> List[int]:
+    """
+    Detect per-row period candidates using scipy.signal.correlate.
+
+    For each row, compute autocorrelation and find the smallest lag
+    with maximal correlation score (earliest strongest repetition).
+
+    Args:
+        G: Grid as numpy array (H, W)
+
+    Returns:
+        List of period candidates, one per row.
+    """
+    H, W = G.shape
+    per = []
+    for r in range(H):
+        x = G[r, :].astype(np.int16)
+        a = correlate(x, x, mode='full')  # length 2W-1, production-grade
+        mid = W - 1
+        pos = a[mid+1:]  # lags 1..W-1
+        if len(pos) == 0:
+            # Edge case: W=1, no positive lags available
+            # Return 1 as the trivial period
+            per.append(1)
+        else:
+            best = np.argmax(pos) + 1  # earliest max lag (argmax returns first index)
+            per.append(int(best))
+    return per
+
+
+def _col_periods(G: np.ndarray) -> List[int]:
+    """
+    Detect per-column period candidates.
+
+    Transpose and apply row logic.
+    """
+    return _row_periods(G.T)
+
+
+def _stable_mode(votes: List[int]) -> Optional[int]:
+    """
+    Return earliest period if unanimous across all votes; else None.
+
+    Args:
+        votes: List of period candidates (from rows or from outputs)
+
+    Returns:
+        Unanimous value if all equal, else None.
+    """
+    if not votes:
+        return None
+    first = votes[0]
+    if all(p == first for p in votes):
+        return int(first)
+    return None
+
+
+def infer_periods(train: List[Dict[str, List[List[int]]]]) -> Dict[str, Any]:
+    """
+    Detect fundamental horizontal and vertical periods from train outputs (WO-04).
+
+    Uses scipy.signal.correlate for autocorrelation-based period detection.
+    Requires 100% agreement across train outputs; else returns None.
+
+    Args:
+        train: List of train pairs with "output" grids (Π-normalized)
+
+    Returns:
+        {
+            "period_h": Optional[int],  # None or integer p, 1 <= p < W
+            "period_v": Optional[int],  # None or integer q, 1 <= q < H
+            "__meta__": {
+                "per_grid": List[...],
+                "stable_h": bool,
+                "stable_v": bool,
+                "conf_h": float,
+                "conf_v": float,
+                "free_invariance_ok": bool,
+                "method": {...},
+                "hash_periods": str
+            }
+        }
+
+    Spec requirements:
+      - Use scipy.signal.correlate(mode='full') for autocorrelation
+      - Require unanimity across all train outputs (100% agreement)
+      - Verify FREE-invariance: rotation swaps H/V for squares (D4),
+        preserves for rectangles under 180° (D2)
+      - Generate deterministic receipts
+    """
+    outs = [np.asarray(p["output"], dtype=np.int16) for p in train]
+    if not outs:
+        raise ValueError("No train outputs")
+
+    # Per-grid candidates
+    per_grid = []
+    for G in outs:
+        votes_h = _row_periods(G) if G.shape[1] > 1 else []
+        votes_v = _col_periods(G) if G.shape[0] > 1 else []
+        p_h = _stable_mode(votes_h)  # unanimity across rows
+        p_v = _stable_mode(votes_v)  # unanimity across cols
+        per_grid.append({
+            "shape": [int(G.shape[0]), int(G.shape[1])],
+            "p_h": p_h,
+            "p_v": p_v,
+            "votes_h": votes_h,
+            "votes_v": votes_v
+        })
+
+    # Across-outputs stability
+    def across(vals, n_outputs):
+        """
+        Require 100% agreement across ALL outputs (including None).
+
+        Returns: (period_or_None, stable, conf)
+          - stable=True iff every output proposes a non-None period and all are equal
+          - conf = (# outputs equal to the unanimous value) / n_outputs when stable,
+                   else (# outputs equal to the most common non-None value) / n_outputs
+        """
+        if n_outputs == 0:
+            return None, False, 0.0
+
+        # Any None means not all outputs found a period → not stable
+        if any(v is None for v in vals):
+            # Confidence still reported to help receipts (how close we are)
+            non_none = [v for v in vals if v is not None]
+            if not non_none:
+                return None, False, 0.0
+            mode_val = max(set(non_none), key=non_none.count)
+            conf = sum(v == mode_val for v in vals) / n_outputs
+            return None, False, float(conf)
+
+        # All non-None: unanimity across outputs
+        unanimous = all(v == vals[0] for v in vals)
+        conf = (sum(v == vals[0] for v in vals) / n_outputs) if unanimous else 0.0
+        return (int(vals[0]) if unanimous else None), unanimous, float(conf)
+
+    period_h, stable_h, conf_h = across([g["p_h"] for g in per_grid], n_outputs=len(outs))
+    period_v, stable_v, conf_v = across([g["p_v"] for g in per_grid], n_outputs=len(outs))
+
+    # FREE invariance: shape-aware checks
+    free_ok = True
+    for G in outs:
+        H, W = G.shape
+        if H == W:
+            # Square: D4 check - 90° rotation should swap H/V periods
+            Gh = np.rot90(G, 1)  # 90° CCW
+            gh_h = _row_periods(Gh)
+            gh_v = _col_periods(Gh)
+            p_h_G = _stable_mode(_row_periods(G))
+            p_v_G = _stable_mode(_col_periods(G))
+            p_h_Gh = _stable_mode(gh_h)
+            p_v_Gh = _stable_mode(gh_v)
+            if p_h_G is not None and p_v_G is not None:
+                # Expect swap: original (p_h, p_v) → rotated (p_v, p_h)
+                free_ok = free_ok and (p_h_G == p_v_Gh and p_v_G == p_h_Gh)
+            # One square grid check is enough
+            break
+        else:
+            # Rectangle: D2 check - 180° rotation should preserve periods (no swap)
+            G2 = np.rot90(G, 2)
+            if _stable_mode(_row_periods(G)) != _stable_mode(_row_periods(G2)):
+                free_ok = False
+                break
+            if _stable_mode(_col_periods(G)) != _stable_mode(_col_periods(G2)):
+                free_ok = False
+                break
+
+    # Generate receipts
+    meta = {
+        "per_grid": per_grid,
+        "stable_h": bool(stable_h),
+        "stable_v": bool(stable_v),
+        "conf_h": float(conf_h),
+        "conf_v": float(conf_v),
+        "free_invariance_ok": bool(free_ok),
+        "method": {
+            "autocorr": {
+                "backend": "scipy.signal.correlate",
+                "mode": "full"
+            }
+        },
+        "hash_periods": hashlib.sha256(
+            np.array([
+                period_h if period_h is not None else -1,
+                period_v if period_v is not None else -1,
+                int(1000 * conf_h),
+                int(1000 * conf_v)
+            ], dtype=np.int64).tobytes()
+        ).hexdigest(),
+    }
+
+    return {
+        "period_h": period_h,
+        "period_v": period_v,
+        "__meta__": meta
+    }

@@ -34,7 +34,7 @@ Each WO stands alone, produces shippable code, and has acceptance checks against
 * Invariance under D4 on trains (apply D4 to both sides, counts unchanged).
 * Receipt: counts vector and tolerance.
 
-### WO-04 — Invariants: periods (H/V)
+### WO-04 — Invariants: periods (H/V) ✅ COMPLETE
 
 **Goal:** Detect fundamental row/col periods by autocorr.
 **API:** `infer_periods(train)->{period_h, period_v}`

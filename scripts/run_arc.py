@@ -113,14 +113,14 @@ def print_receipt_summary(result: TaskResult) -> None:
                     print(f"    Palette map: {palette_map}")
             elif receipt.stage == "03_infer_invariants":
                 details = receipt.details
-                print(f"    FREE-invariant: {details.get('free_invariance_ok', 'N/A')}")
+                # Color counts
+                print(f"    Color counts FREE-ok: {details.get('color_counts_free_ok', 'N/A')}")
                 print(f"    Palette size: {details.get('palette_size', 0)}")
-                print(f"    Train outputs: {details.get('num_train_outputs', 0)}")
-                print(f"    Hash: {details.get('hash_counts', 'N/A')}")
-                # Show first grid counts as example
-                per_grid = details.get('per_grid_counts', [])
-                if per_grid:
-                    print(f"    Example counts: {per_grid[0].get('counts', {})}")
+                # Periods
+                print(f"    Periods FREE-ok: {details.get('periods_free_ok', 'N/A')}")
+                print(f"    Period H: {details.get('period_h', 'None')} (stable={details.get('stable_h', False)}, conf={details.get('conf_h', 0.0):.2f})")
+                print(f"    Period V: {details.get('period_v', 'None')} (stable={details.get('stable_v', False)}, conf={details.get('conf_v', 0.0):.2f})")
+                print(f"    Hash periods: {details.get('hash_periods', 'N/A')}")
 
 
 def main():

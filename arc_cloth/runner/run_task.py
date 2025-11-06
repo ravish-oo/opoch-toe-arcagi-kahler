@@ -19,7 +19,7 @@ import numpy as np
 
 from arc_cloth.io.arc_loader import Grid, Task, TaskMetadata, load_task
 from arc_cloth.io.canonicalize import canonicalize_task, CanonicalTask
-from arc_cloth.model.invariants import infer_color_counts, ColorCountsInvariant
+from arc_cloth.model.invariants import infer_color_counts, infer_periods, ColorCountsInvariant
 
 
 @dataclass
@@ -196,9 +196,9 @@ def _stage_03_infer_invariants(
 
     Currently implements:
     - Color counts (WO-03) ✓
+    - Periods via autocorrelation (WO-04) ✓
 
     Future WOs:
-    - Tiling/periodicity (WO-04)
     - Mirrors/reflections (WO-05)
     - Component mappings (WO-06)
     - Block substitutions (WO-07)
@@ -211,18 +211,31 @@ def _stage_03_infer_invariants(
         # WO-03: Extract color counts from train outputs
         color_counts = infer_color_counts(task)
 
+        # WO-04: Extract periods from train outputs
+        periods = infer_periods(task["train"])
+
         # Extract receipts
         counts_meta = color_counts.get("__meta__", {})
+        periods_meta = periods.get("__meta__", {})
 
         details = {
-            "free_invariance_ok": counts_meta.get("free_invariance_ok", False),
+            # Color counts receipts
+            "color_counts_free_ok": counts_meta.get("free_invariance_ok", False),
             "palette_size": counts_meta.get("palette_size", 0),
             "num_train_outputs": counts_meta.get("num_train_outputs", 0),
             "hash_counts": counts_meta.get("hash_counts", ""),
-            "per_grid_counts": counts_meta.get("per_grid_counts", []),
+            # Periods receipts
+            "period_h": periods.get("period_h"),
+            "period_v": periods.get("period_v"),
+            "periods_free_ok": periods_meta.get("free_invariance_ok", False),
+            "stable_h": periods_meta.get("stable_h", False),
+            "stable_v": periods_meta.get("stable_v", False),
+            "conf_h": periods_meta.get("conf_h", 0.0),
+            "conf_v": periods_meta.get("conf_v", 0.0),
+            "hash_periods": periods_meta.get("hash_periods", ""),
         }
 
-        # Verify FREE-invariance
+        # Verify FREE-invariance for both invariants
         if not counts_meta.get("free_invariance_ok", False):
             return (
                 StageReceipt(
@@ -235,9 +248,22 @@ def _stage_03_infer_invariants(
                 None,
             )
 
+        if not periods_meta.get("free_invariance_ok", False):
+            return (
+                StageReceipt(
+                    stage="03_infer_invariants",
+                    status="error",
+                    time_s=time.time() - t0,
+                    error="Periods not FREE-invariant",
+                    details=details,
+                ),
+                None,
+            )
+
         # Build invariants dict
         invariants = {
             "color_counts": color_counts,
+            "periods": periods,
         }
 
         receipt = StageReceipt(
