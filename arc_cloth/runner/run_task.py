@@ -19,7 +19,12 @@ import numpy as np
 
 from arc_cloth.io.arc_loader import Grid, Task, TaskMetadata, load_task
 from arc_cloth.io.canonicalize import canonicalize_task, CanonicalTask
-from arc_cloth.model.invariants import infer_color_counts, infer_periods, ColorCountsInvariant
+from arc_cloth.model.invariants import (
+    infer_color_counts,
+    infer_periods,
+    infer_symmetries,
+    ColorCountsInvariant
+)
 
 
 @dataclass
@@ -197,9 +202,9 @@ def _stage_03_infer_invariants(
     Currently implements:
     - Color counts (WO-03) ✓
     - Periods via autocorrelation (WO-04) ✓
+    - Mirror seams and concatenations (WO-05) ✓
 
     Future WOs:
-    - Mirrors/reflections (WO-05)
     - Component mappings (WO-06)
     - Block substitutions (WO-07)
 
@@ -214,9 +219,13 @@ def _stage_03_infer_invariants(
         # WO-04: Extract periods from train outputs
         periods = infer_periods(task["train"])
 
+        # WO-05: Extract mirror seams and concatenations
+        symmetries = infer_symmetries(task["train"])
+
         # Extract receipts
         counts_meta = color_counts.get("__meta__", {})
         periods_meta = periods.get("__meta__", {})
+        symmetries_meta = symmetries.get("__meta__", {})
 
         details = {
             # Color counts receipts
@@ -233,9 +242,17 @@ def _stage_03_infer_invariants(
             "conf_h": periods_meta.get("conf_h", 0.0),
             "conf_v": periods_meta.get("conf_v", 0.0),
             "hash_periods": periods_meta.get("hash_periods", ""),
+            # Symmetries receipts
+            "mirror_h": symmetries.get("mirror_h", False),
+            "mirror_v": symmetries.get("mirror_v", False),
+            "concat_axes": symmetries.get("concat_axes", []),
+            "symmetries_free_ok": symmetries_meta.get("free_invariance_ok", False),
+            "n_h_seams": symmetries_meta.get("n_h_seams", 0),
+            "n_v_seams": symmetries_meta.get("n_v_seams", 0),
+            "hash_sym": symmetries_meta.get("hash_sym", ""),
         }
 
-        # Verify FREE-invariance for both invariants
+        # Verify FREE-invariance for all invariants
         if not counts_meta.get("free_invariance_ok", False):
             return (
                 StageReceipt(
@@ -260,10 +277,23 @@ def _stage_03_infer_invariants(
                 None,
             )
 
+        if not symmetries_meta.get("free_invariance_ok", False):
+            return (
+                StageReceipt(
+                    stage="03_infer_invariants",
+                    status="error",
+                    time_s=time.time() - t0,
+                    error="Symmetries not FREE-invariant",
+                    details=details,
+                ),
+                None,
+            )
+
         # Build invariants dict
         invariants = {
             "color_counts": color_counts,
             "periods": periods,
+            "symmetries": symmetries,
         }
 
         receipt = StageReceipt(

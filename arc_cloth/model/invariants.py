@@ -201,6 +201,9 @@ def infer_color_counts(
 # ============================================================================
 
 
+
+
+
 def _row_periods(G: np.ndarray) -> List[int]:
     """
     Detect per-row period candidates using scipy.signal.correlate.
@@ -396,5 +399,287 @@ def infer_periods(train: List[Dict[str, List[List[int]]]]) -> Dict[str, Any]:
     return {
         "period_h": period_h,
         "period_v": period_v,
+        "__meta__": meta
+    }
+
+
+# ============================================================================
+# WO-05: Mirror Seams and Band Concatenation Detection
+# ============================================================================
+
+
+def _mirror_h_seams(G: np.ndarray) -> List[int]:
+    """
+    Detect horizontal mirror seams (left|right symmetry around vertical seam).
+
+    For each potential vertical seam at column j, check if:
+      - left half (G[:, :j]) equals fliplr(right half (G[:, j:]))
+      - and widths match
+
+    Uses numpy.fliplr for exact axis flip.
+
+    Args:
+        G: Grid as numpy array (H, W)
+
+    Returns:
+        List of column indices where mirror seams exist.
+    """
+    H, W = G.shape
+    seams = []
+    for j in range(1, W):  # seam between columns j-1 and j
+        left = G[:, :j]
+        right = G[:, j:]
+        if left.shape[1] == right.shape[1] and np.array_equal(left, np.fliplr(right)):
+            seams.append(j)
+    return seams
+
+
+def _mirror_v_seams(G: np.ndarray) -> List[int]:
+    """
+    Detect vertical mirror seams (top|bottom symmetry around horizontal seam).
+
+    For each potential horizontal seam at row i, check if:
+      - top half (G[:i, :]) equals flipud(bottom half (G[i:, :]))
+      - and heights match
+
+    Uses numpy.flipud for exact axis flip.
+
+    Args:
+        G: Grid as numpy array (H, W)
+
+    Returns:
+        List of row indices where mirror seams exist.
+    """
+    H, W = G.shape
+    seams = []
+    for i in range(1, H):  # seam between rows i-1 and i
+        top = G[:i, :]
+        bottom = G[i:, :]
+        if top.shape[0] == bottom.shape[0] and np.array_equal(top, np.flipud(bottom)):
+            seams.append(i)
+    return seams
+
+
+def _concat_h(G: np.ndarray) -> bool:
+    """
+    Check for exact horizontal band concatenation (left half == right half).
+
+    Requires even width. Uses numpy.array_equal for strict equality.
+
+    Args:
+        G: Grid as numpy array (H, W)
+
+    Returns:
+        True if left half exactly equals right half.
+    """
+    H, W = G.shape
+    if W % 2:  # odd width, no exact halves
+        return False
+    return np.array_equal(G[:, :W//2], G[:, W//2:])
+
+
+def _concat_v(G: np.ndarray) -> bool:
+    """
+    Check for exact vertical band concatenation (top half == bottom half).
+
+    Requires even height. Uses numpy.array_equal for strict equality.
+
+    Args:
+        G: Grid as numpy array (H, W)
+
+    Returns:
+        True if top half exactly equals bottom half.
+    """
+    H, W = G.shape
+    if H % 2:  # odd height, no exact halves
+        return False
+    return np.array_equal(G[:H//2, :], G[H//2:, :])
+
+
+def infer_symmetries(train: List[Dict[str, List[List[int]]]]) -> Dict[str, Any]:
+    """
+    Detect exact mirror seams and band concatenations from train outputs (WO-05).
+
+    Uses numpy primitives for exact equality checks:
+    - np.fliplr/flipud for axis flips
+    - np.array_equal for strict equality
+    - np.rot90 for FREE-invariance verification
+
+    Args:
+        train: List of train pairs with "output" grids (Π-normalized)
+
+    Returns:
+        {
+            "mirror_h": bool,  # True iff EVERY output has ≥1 h-seam
+            "mirror_v": bool,  # True iff EVERY output has ≥1 v-seam
+            "mirror_h_seams": List[int],  # all h-seams from all outputs
+            "mirror_v_seams": List[int],  # all v-seams from all outputs
+            "concat_axes": List["h"|"v"],  # axes where ALL outputs concat
+            "__meta__": {
+                "per_grid": List[...],
+                "free_invariance_ok": bool,
+                "n_outputs", "n_square", "n_rect",
+                "n_h_seams", "n_v_seams",
+                "hash_sym": str,
+                "method": {...}
+            }
+        }
+
+    Spec requirements:
+      - Use np.fliplr, np.flipud, np.array_equal, np.rot90 only
+      - Task-level flags require ALL outputs to satisfy condition
+      - FREE-invariance: squares swap H↔V under 90°, rectangles preserve under 180°
+      - Deterministic receipts
+    """
+    outs = [np.asarray(p["output"], dtype=np.int16) for p in train]
+    if not outs:
+        raise ValueError("No train outputs")
+
+    # Per-grid detection
+    per_grid = []
+    n_square = 0
+    n_rect = 0
+    all_h_seams = []
+    all_v_seams = []
+
+    # Track: do ALL outputs satisfy each condition?
+    all_have_h_seam = True
+    all_have_v_seam = True
+    all_have_concat_h = True
+    all_have_concat_v = True
+
+    for G in outs:
+        H, W = G.shape
+        group = "D4" if H == W else "D2"
+        if group == "D4":
+            n_square += 1
+        else:
+            n_rect += 1
+
+        # Detect seams and concats for this grid
+        h_seams = _mirror_h_seams(G)
+        v_seams = _mirror_v_seams(G)
+        concat_h = _concat_h(G)
+        concat_v = _concat_v(G)
+
+        # Update task-level flags (require ALL outputs to satisfy)
+        all_have_h_seam &= bool(h_seams)  # has at least one h-seam
+        all_have_v_seam &= bool(v_seams)  # has at least one v-seam
+        all_have_concat_h &= concat_h
+        all_have_concat_v &= concat_v
+
+        # Collect all seams for receipts
+        all_h_seams.extend(h_seams)
+        all_v_seams.extend(v_seams)
+
+        per_grid.append({
+            "shape": [int(H), int(W)],
+            "group": group,
+            "mirror_h_seams": h_seams,
+            "mirror_v_seams": v_seams,
+            "concat_h": concat_h,
+            "concat_v": concat_v
+        })
+
+    # Task-level flags
+    mirror_h = bool(all_have_h_seam)
+    mirror_v = bool(all_have_v_seam)
+    concat_axes = []
+    if all_have_concat_h:
+        concat_axes.append("h")
+    if all_have_concat_v:
+        concat_axes.append("v")
+
+    # FREE-invariance: shape-aware checks
+    # CRITICAL: Check properties of G vs properties of transformed G
+    # NOT task-level flags vs transformed grid properties
+    free_ok = True
+    for G in outs:
+        H, W = G.shape
+        if H == W:
+            # Square: D4 check - 90° rotation should swap H↔V properties
+            G90 = np.rot90(G, 1)
+
+            # Detect properties on both G and G90
+            h_seams_G = _mirror_h_seams(G)
+            v_seams_G = _mirror_v_seams(G)
+            h_seams_G90 = _mirror_h_seams(G90)
+            v_seams_G90 = _mirror_v_seams(G90)
+            concat_h_G = _concat_h(G)
+            concat_v_G = _concat_v(G)
+            concat_h_G90 = _concat_h(G90)
+            concat_v_G90 = _concat_v(G90)
+
+            # H-seams on G should become V-seams on G90 (swap)
+            if bool(h_seams_G) != bool(v_seams_G90):
+                free_ok = False
+                break
+            # V-seams on G should become H-seams on G90 (swap)
+            if bool(v_seams_G) != bool(h_seams_G90):
+                free_ok = False
+                break
+            # Concat H on G should become concat V on G90 (swap)
+            if concat_h_G != concat_v_G90:
+                free_ok = False
+                break
+            # Concat V on G should become concat H on G90 (swap)
+            if concat_v_G != concat_h_G90:
+                free_ok = False
+                break
+
+            # One square grid check is enough
+            break
+        else:
+            # Rectangle: D2 check - 180° rotation should preserve properties (no swap)
+            G2 = np.rot90(G, 2)
+
+            # H-seam existence should be preserved
+            if bool(_mirror_h_seams(G)) != bool(_mirror_h_seams(G2)):
+                free_ok = False
+                break
+            # V-seam existence should be preserved
+            if bool(_mirror_v_seams(G)) != bool(_mirror_v_seams(G2)):
+                free_ok = False
+                break
+            # Concat properties should be preserved
+            if _concat_h(G) != _concat_h(G2):
+                free_ok = False
+                break
+            if _concat_v(G) != _concat_v(G2):
+                free_ok = False
+                break
+
+    # Generate receipts
+    meta = {
+        "per_grid": per_grid,
+        "free_invariance_ok": bool(free_ok),
+        "n_outputs": len(outs),
+        "n_square": int(n_square),
+        "n_rect": int(n_rect),
+        "n_h_seams": len(all_h_seams),
+        "n_v_seams": len(all_v_seams),
+        "hash_sym": hashlib.sha256(
+            "|".join([
+                str(mirror_h),
+                str(mirror_v),
+                ",".join(concat_axes),
+                str(sorted(all_h_seams)),
+                str(sorted(all_v_seams))
+            ]).encode()
+        ).hexdigest(),
+        "method": {
+            "flipud": "numpy.flipud",
+            "fliplr": "numpy.fliplr",
+            "array_equal": "numpy.array_equal",
+            "rot90": "numpy.rot90"
+        }
+    }
+
+    return {
+        "mirror_h": mirror_h,
+        "mirror_v": mirror_v,
+        "mirror_h_seams": sorted(all_h_seams),
+        "mirror_v_seams": sorted(all_v_seams),
+        "concat_axes": concat_axes,
         "__meta__": meta
     }

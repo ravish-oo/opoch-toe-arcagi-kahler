@@ -44,7 +44,7 @@ Each WO stands alone, produces shippable code, and has acceptance checks against
 * D4 invariance (rotation swaps h/v as expected).
 * Receipt: period(s) with confidence score.
 
-### WO-05 — Invariants: mirror / concat flags
+### WO-05 — Invariants: mirror / concat flags ✅ COMPLETE
 
 **Goal:** Detect exact mirror seams and band concats.
 **API:** `infer_symmetries(train)->{mirror_h, mirror_v, concat_axes}`
