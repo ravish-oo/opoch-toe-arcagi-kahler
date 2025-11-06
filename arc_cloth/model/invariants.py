@@ -683,3 +683,257 @@ def infer_symmetries(train: List[Dict[str, List[List[int]]]]) -> Dict[str, Any]:
         "concat_axes": concat_axes,
         "__meta__": meta
     }
+
+
+# ============================================================================
+# WO-06: Block Codebook Learning (Minimal Patch Map)
+# ============================================================================
+
+
+def _build_codebook_for_k(
+    pairs: List[Tuple[np.ndarray, np.ndarray]], k: int
+) -> Tuple[Optional[Dict[bytes, bytes]], Dict[str, Any]]:
+    """
+    Try to build a single-valued, bijective block codebook for block size k.
+
+    Args:
+        pairs: List of (input, output) numpy arrays
+        k: Block size (2 or 3)
+
+    Returns:
+        (codebook_or_None, metadata)
+        - codebook is Dict[bytes, bytes] if valid, else None
+        - metadata contains eligibility, single_valued_ok, bijection_ok, etc.
+    """
+    from skimage.util import view_as_blocks
+
+    # Eligibility check: ALL pairs must have matching shapes divisible by k
+    for X, Y in pairs:
+        H, W = X.shape
+        if X.shape != Y.shape or (H % k) or (W % k):
+            return None, {
+                "eligible": False,
+                "reason": "shape_mismatch_or_not_divisible",
+                "single_valued_ok": False,
+                "bijection_ok": False,
+                "n_blocks_total": 0,
+                "coverage": 0.0
+            }
+
+    # Collect aligned blocks from ALL pairs
+    codebook: Dict[bytes, bytes] = {}
+    seen_positions = 0
+    conflicts = False
+
+    for X, Y in pairs:
+        # Extract non-overlapping k×k blocks using production-grade view_as_blocks
+        Bx = view_as_blocks(X, block_shape=(k, k))  # shape: [H/k, W/k, k, k]
+        By = view_as_blocks(Y, block_shape=(k, k))
+
+        # Reshape to 2D list of patches
+        Bx_flat = Bx.reshape(-1, k, k)
+        By_flat = By.reshape(-1, k, k)
+
+        for bx, by in zip(Bx_flat, By_flat):
+            # Convert to bytes for exact comparison
+            key = bx.astype("uint8").tobytes()
+            val = by.astype("uint8").tobytes()
+            seen_positions += 1
+
+            # Check single-valued: same input must map to same output
+            if key in codebook:
+                if codebook[key] != val:
+                    conflicts = True
+                    break
+            else:
+                codebook[key] = val
+
+        if conflicts:
+            break
+
+    if conflicts:
+        return None, {
+            "eligible": True,
+            "single_valued_ok": False,
+            "bijection_ok": False,
+            "n_blocks_total": seen_positions,
+            "coverage": 0.0,
+            "reason": "conflicting_mappings"
+        }
+
+    # Check bijection: |image| == |domain| (one-to-one)
+    single_valued_ok = True
+    image_vals = set(codebook.values())
+    bijection_ok = (len(image_vals) == len(codebook))
+
+    # Coverage (for v1, should be 1.0 since we process all aligned blocks)
+    coverage = 1.0 if seen_positions > 0 else 0.0
+
+    # Hash for receipts
+    hash_str = (
+        f"{k}|{len(codebook)}|" +
+        "|".join(f"{k_.hex()}:{v_.hex()}" for k_, v_ in sorted(codebook.items()))
+    )
+    hash_codebook = hashlib.sha256(hash_str.encode()).hexdigest()
+
+    meta = {
+        "eligible": True,
+        "single_valued_ok": single_valued_ok,
+        "bijection_ok": bijection_ok,
+        "coverage": coverage,
+        "n_blocks_total": seen_positions,
+        "hash_codebook": hash_codebook,
+    }
+
+    return (codebook if bijection_ok else None), meta
+
+
+def infer_block_codebook(train: List[Dict[str, List[List[int]]]]) -> Dict[str, Any]:
+    """
+    Learn exact input→output patch dictionary for k∈{2,3} (WO-06).
+
+    Only accepts if mapping is:
+    - Single-valued: same input block → same output block always
+    - Bijective: one-to-one (no two inputs → same output)
+
+    Uses skimage.util.view_as_blocks for production-grade patch extraction.
+
+    Args:
+        train: List of train pairs with "input" and "output" grids (Π-normalized)
+
+    Returns:
+        {
+            "block_size": (k, k) or None,
+            "codebook": Dict[bytes, bytes] or None,
+            "__meta__": {
+                "k_tried": [2, 3],
+                "accepted_k": int or None,
+                "n_pairs": int,
+                "n_blocks_total": int,
+                "single_valued_ok": bool,
+                "bijection_ok": bool,
+                "coverage": float,
+                "free_invariance_ok": bool,
+                "hash_codebook": str,
+                "method": {...}
+            }
+        }
+
+    Spec requirements:
+      - Use skimage.util.view_as_blocks for extraction
+      - Try k=2 first, then k=3; accept first valid
+      - Require single-valued AND bijective
+      - FREE-invariance: structural consistency after same transform
+      - No exceptions: return clean None if no valid k
+    """
+    if not train:
+        raise ValueError("No train pairs")
+
+    # Convert to numpy arrays
+    pairs = [
+        (np.asarray(p["input"], dtype=np.int16),
+         np.asarray(p["output"], dtype=np.int16))
+        for p in train
+    ]
+
+    k_tried: List[int] = []
+    attempts: List[Dict[str, Any]] = []  # Track all k attempts with real metadata
+    accepted_k = None
+    final_codebook = None
+    final_meta = {}
+
+    for k in (2, 3):
+        k_tried.append(k)
+        codebook, meta = _build_codebook_for_k(pairs, k)
+        attempts.append({"k": k, **meta})  # Preserve real metadata from each attempt
+
+        # FREE-invariance check: apply same transform to both X,Y
+        free_ok = True
+        if codebook is not None:
+            X, Y = pairs[0]
+            H, W = X.shape
+
+            # Shape-aware transform (same as WO-05)
+            if H == W:
+                # Square: try 90° rotation (D4)
+                Xt = np.rot90(X, 1)
+                Yt = np.rot90(Y, 1)
+            else:
+                # Rectangle: try 180° rotation (D2)
+                Xt = np.rot90(X, 2)
+                Yt = np.rot90(Y, 2)
+
+            # Rebuild codebook on transformed pair
+            cb_transformed, _ = _build_codebook_for_k([(Xt, Yt)], k)
+
+            # Structural sanity: transformed should have same # of entries
+            # (exact equality would require perfect D4/D2 invariance of the mapping itself)
+            if cb_transformed is None:
+                free_ok = False
+            elif len(cb_transformed) != len(codebook):
+                free_ok = False
+
+        # If we found a valid codebook with good FREE check, accept it
+        if codebook is not None and free_ok:
+            accepted_k = k
+            final_codebook = codebook
+            final_meta = {**meta, "accepted_k": k, "free_invariance_ok": free_ok}
+            break
+
+        # If codebook exists but FREE check failed, still record and reject
+        if codebook is not None and not free_ok:
+            final_meta = {**meta, "accepted_k": None, "free_invariance_ok": free_ok}
+
+    # Build final result
+    if accepted_k is not None:
+        result_meta = {
+            "k_tried": k_tried,
+            "accepted_k": accepted_k,
+            "n_pairs": len(pairs),
+            **final_meta,
+            "attempts": attempts,  # Include full audit trail
+            "method": {
+                "view_as_blocks": "skimage.util.view_as_blocks",
+                "array_equal": "numpy.array_equal",
+                "unique": "numpy.unique",
+                "rot90": "numpy.rot90",
+                "hashlib": "hashlib.sha256"
+            }
+        }
+        return {
+            "block_size": (accepted_k, accepted_k),
+            "codebook": final_codebook,
+            "__meta__": result_meta
+        }
+    else:
+        # No valid k found - preserve LAST attempt's real metadata for debugging
+        last_meta = attempts[-1] if attempts else {
+            "eligible": False,
+            "reason": "no_eligible_k",
+            "single_valued_ok": False,
+            "bijection_ok": False,
+            "n_blocks_total": 0,
+            "coverage": 0.0,
+        }
+
+        result_meta = {
+            "k_tried": k_tried,
+            "accepted_k": None,
+            "n_pairs": len(pairs),
+            **last_meta,  # ← Preserve actual metadata from last k attempt
+            "free_invariance_ok": True,  # vacuously true if no codebook
+            "hash_codebook": "",
+            "attempts": attempts,  # Full per-k audit trail
+            "method": {
+                "view_as_blocks": "skimage.util.view_as_blocks",
+                "array_equal": "numpy.array_equal",
+                "unique": "numpy.unique",
+                "rot90": "numpy.rot90",
+                "hashlib": "hashlib.sha256"
+            }
+        }
+        return {
+            "block_size": None,
+            "codebook": None,
+            "__meta__": result_meta
+        }

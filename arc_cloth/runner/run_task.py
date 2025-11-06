@@ -23,6 +23,7 @@ from arc_cloth.model.invariants import (
     infer_color_counts,
     infer_periods,
     infer_symmetries,
+    infer_block_codebook,
     ColorCountsInvariant
 )
 
@@ -203,10 +204,10 @@ def _stage_03_infer_invariants(
     - Color counts (WO-03) ✓
     - Periods via autocorrelation (WO-04) ✓
     - Mirror seams and concatenations (WO-05) ✓
+    - Block codebook learning (WO-06) ✓
 
     Future WOs:
-    - Component mappings (WO-06)
-    - Block substitutions (WO-07)
+    - Component mappings (WO-07+)
 
     Returns (receipt, invariants_dict).
     """
@@ -222,10 +223,14 @@ def _stage_03_infer_invariants(
         # WO-05: Extract mirror seams and concatenations
         symmetries = infer_symmetries(task["train"])
 
+        # WO-06: Extract block codebook (input→output patch map)
+        block_codebook = infer_block_codebook(task["train"])
+
         # Extract receipts
         counts_meta = color_counts.get("__meta__", {})
         periods_meta = periods.get("__meta__", {})
         symmetries_meta = symmetries.get("__meta__", {})
+        blockmap_meta = block_codebook.get("__meta__", {})
 
         details = {
             # Color counts receipts
@@ -250,6 +255,15 @@ def _stage_03_infer_invariants(
             "n_h_seams": symmetries_meta.get("n_h_seams", 0),
             "n_v_seams": symmetries_meta.get("n_v_seams", 0),
             "hash_sym": symmetries_meta.get("hash_sym", ""),
+            # Block codebook receipts
+            "block_size": block_codebook.get("block_size"),
+            "blockmap_free_ok": blockmap_meta.get("free_invariance_ok", False),
+            "single_valued_ok": blockmap_meta.get("single_valued_ok", False),
+            "bijection_ok": blockmap_meta.get("bijection_ok", False),
+            "n_blocks_total": blockmap_meta.get("n_blocks_total", 0),
+            "coverage": blockmap_meta.get("coverage", 0.0),
+            "hash_codebook": blockmap_meta.get("hash_codebook", ""),
+            "attempts": blockmap_meta.get("attempts", []),  # Per-k audit trail
         }
 
         # Verify FREE-invariance for all invariants
@@ -289,11 +303,24 @@ def _stage_03_infer_invariants(
                 None,
             )
 
+        if not blockmap_meta.get("free_invariance_ok", False):
+            return (
+                StageReceipt(
+                    stage="03_infer_invariants",
+                    status="error",
+                    time_s=time.time() - t0,
+                    error="Block codebook not FREE-invariant",
+                    details=details,
+                ),
+                None,
+            )
+
         # Build invariants dict
         invariants = {
             "color_counts": color_counts,
             "periods": periods,
             "symmetries": symmetries,
+            "block_codebook": block_codebook,
         }
 
         receipt = StageReceipt(

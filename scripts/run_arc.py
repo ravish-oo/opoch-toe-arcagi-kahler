@@ -127,6 +127,14 @@ def print_receipt_summary(result: TaskResult) -> None:
                 concat_axes = details.get('concat_axes', [])
                 concat_str = ", ".join(concat_axes) if concat_axes else "none"
                 print(f"    Concat axes: {concat_str}")
+                # Block codebook
+                print(f"    Block codebook FREE-ok: {details.get('blockmap_free_ok', 'N/A')}")
+                block_size = details.get('block_size')
+                if block_size:
+                    print(f"    Block size: {block_size[0]}x{block_size[1]} (single-valued={details.get('single_valued_ok', False)}, bijection={details.get('bijection_ok', False)})")
+                    print(f"    Blocks: {details.get('n_blocks_total', 0)}, coverage={details.get('coverage', 0.0):.2f}")
+                else:
+                    print(f"    Block size: None (no valid k)")
 
 
 def main():
