@@ -116,6 +116,7 @@ def print_receipt_summary(result: TaskResult) -> None:
                 # Color counts
                 print(f"    Color counts FREE-ok: {details.get('color_counts_free_ok', 'N/A')}")
                 print(f"    Palette size: {details.get('palette_size', 0)}")
+                print(f"    Stable counts: {details.get('stable_counts', False)}, Stable props: {details.get('stable_props', False)}")
                 # Periods
                 print(f"    Periods FREE-ok: {details.get('periods_free_ok', 'N/A')}")
                 print(f"    Period H: {details.get('period_h', 'None')} (stable={details.get('stable_h', False)}, conf={details.get('conf_h', 0.0):.2f})")
@@ -147,8 +148,16 @@ def print_receipt_summary(result: TaskResult) -> None:
                 for term, count in sorted(term_counts.items()):
                     if count > 0:
                         print(f"      {term}: {count}")
-                # D status
-                print(f"    D status: {details.get('D_status', 'unknown')}")
+                # D receipts
+                print(f"    D DCP-valid: {details.get('D_dcp_ok', False)}")
+                print(f"    D terms: {details.get('D_num_terms', 0)}")
+                print(f"    D constraints: {details.get('D_num_constraints', 0)}")
+                D_weights = details.get('D_term_weights', {})
+                if D_weights:
+                    print(f"    D weights: {', '.join(f'{k}={v}' for k, v in D_weights.items())}")
+                train_vals = details.get('D_train_values', [])
+                if train_vals:
+                    print(f"    D train reproduction: mean={details.get('D_train_mean', 0):.6f}, max={details.get('D_train_max', 0):.6f}")
 
 
 def main():
@@ -196,6 +205,11 @@ def main():
         "--check-gamma",
         action="store_true",
         help="Output Gamma-specific CSV for interface constraint analysis",
+    )
+    parser.add_argument(
+        "--check-D",
+        action="store_true",
+        help="Output D-specific CSV for convex objective analysis",
     )
 
     args = parser.parse_args()
@@ -396,6 +410,65 @@ def main():
                     })
 
         print(f"\nGamma CSV saved to: {gamma_csv_path}")
+
+    # Save D-specific CSV if --check-D requested
+    if args.check_D:
+        D_csv_path = Path(args.csv if args.csv else "D_check.csv")
+        if args.csv:
+            # If --csv is also set, use different name for D CSV
+            D_csv_path = D_csv_path.with_name(D_csv_path.stem + "_D.csv")
+
+        with D_csv_path.open("w", newline="") as f:
+            writer = csv.DictWriter(
+                f,
+                fieldnames=[
+                    "task_id",
+                    "status",
+                    "dcp_ok",
+                    "gamma_rows",
+                    "D_num_terms",
+                    "D_num_constraints",
+                    "D_terms",
+                    "D_train_mean",
+                    "D_train_max",
+                ],
+            )
+            writer.writeheader()
+
+            for r in results:
+                # Extract D receipts from stage 04
+                stage04 = next((rec for rec in r.receipts if rec.stage == "04_build_potential"), None)
+
+                if stage04 and stage04.status == "ok":
+                    details = stage04.details
+                    term_weights = details.get("D_term_weights", {})
+
+                    writer.writerow({
+                        "task_id": r.task_id,
+                        "status": r.status,
+                        "dcp_ok": details.get("D_dcp_ok", False),
+                        "gamma_rows": details.get("gamma_M", 0),
+                        "D_num_terms": details.get("D_num_terms", 0),
+                        "D_num_constraints": details.get("D_num_constraints", 0),
+                        "D_terms": ";".join(f"{k}:{v}" for k, v in term_weights.items()),
+                        "D_train_mean": f"{details.get('D_train_mean', 0):.6f}",
+                        "D_train_max": f"{details.get('D_train_max', 0):.6f}",
+                    })
+                else:
+                    # Task didn't reach stage 04 or failed
+                    writer.writerow({
+                        "task_id": r.task_id,
+                        "status": r.status,
+                        "dcp_ok": False,
+                        "gamma_rows": 0,
+                        "D_num_terms": 0,
+                        "D_num_constraints": 0,
+                        "D_terms": "",
+                        "D_train_mean": "0.0",
+                        "D_train_max": "0.0",
+                    })
+
+        print(f"\nD CSV saved to: {D_csv_path}")
 
     # Exit code
     error_count = status_counts.get("error", 0)

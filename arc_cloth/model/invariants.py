@@ -169,8 +169,55 @@ def infer_color_counts(
             "counts": counts_dict,
         })
 
+    # Stability analysis: check if counts or proportions are stable across train outputs
+    # (WO-03 patch v2: scale-aware color targets)
+
+    # For each train output, compute counts and proportions
+    train_counts_list = []  # List of count vectors (np.array of shape [C])
+    train_props_list = []   # List of proportion vectors (np.array of shape [C])
+    train_areas = []        # List of grid areas (int)
+
+    for pair in task["train"]:
+        output_grid = np.asarray(pair["output"], dtype=np.int16)
+        area = int(output_grid.size)
+        counts = np.bincount(output_grid.ravel(), minlength=palette_size)
+        props = counts.astype(float) / area if area > 0 else np.zeros(palette_size, dtype=float)
+
+        train_counts_list.append(counts)
+        train_props_list.append(props)
+        train_areas.append(area)
+
+    # Stability check 1: Exact counts (all counts identical AND all areas identical)
+    stable_counts = False
+    color_counts_stable = None
+
+    if len(train_counts_list) > 0:
+        # Check if all areas are identical
+        all_areas_same = all(a == train_areas[0] for a in train_areas)
+
+        if all_areas_same:
+            # Check if all count vectors are identical
+            ref_counts = train_counts_list[0]
+            all_counts_same = all(np.array_equal(c, ref_counts) for c in train_counts_list)
+
+            if all_counts_same:
+                stable_counts = True
+                color_counts_stable = ref_counts.tolist()
+
+    # Stability check 2: Proportions (all proportion vectors identical with tolerance)
+    stable_props = False
+    color_props_stable = None
+
+    if len(train_props_list) > 0:
+        ref_props = train_props_list[0]
+        # Use allclose with reasonable tolerance for floating-point comparison
+        all_props_same = all(np.allclose(p, ref_props, rtol=1e-9, atol=1e-12) for p in train_props_list)
+
+        if all_props_same:
+            stable_props = True
+            color_props_stable = ref_props.tolist()
+
     # Aggregate counts: compute hash of sorted counts for fingerprinting
-    # This allows quick comparison of "is this the same invariant?"
     all_counts_list = [g["counts"] for g in per_grid_counts]
     counts_json = json.dumps(all_counts_list, sort_keys=True, separators=(',', ':'))
     hash_counts = hashlib.sha256(counts_json.encode('utf-8')).hexdigest()[:16]
@@ -182,15 +229,25 @@ def infer_color_counts(
         "palette_size": palette_size,
         "hash_counts": hash_counts,
         "num_train_outputs": len(task["train"]),
+        "stable_counts": stable_counts,
+        "stable_props": stable_props,
+        "train_areas": train_areas,
     }
 
-    # Create result
+    # Create result with optional color_counts and color_props
     result = ColorCountsInvariant({
         "type": "color_counts",
         "palette_size": palette_size,
         "per_grid_counts": per_grid_counts,
         "hash": hash_counts,
     })
+
+    # Add stable targets (only if stability checks pass)
+    if stable_counts:
+        result["color_counts"] = color_counts_stable
+    if stable_props:
+        result["color_props"] = color_props_stable
+
     result["__meta__"] = receipts
 
     return result

@@ -54,7 +54,7 @@ Each WO stands alone, produces shippable code, and has acceptance checks against
 * D4 invariance respected.
 * Receipt: seam indices.
 
-### WO-06 — Invariants: minimal block map (2×2 or 3×3)
+### WO-06 — Invariants: minimal block map (2×2 or 3×3) ✅ COMPLETE
 
 **Goal:** Learn tiny patch dictionary if single-valued across trains.
 **API:** `infer_block_codebook(train)->{block_size, codebook}`
@@ -65,7 +65,7 @@ Each WO stands alone, produces shippable code, and has acceptance checks against
 
 > These 4 invariant WOs are small; together ~300–500 LOC.
 
-### WO-07 — Γ builder (seams as linear equalities)
+### WO-07 — Γ builder (seams as linear equalities) ✅ COMPLETE
 
 **Goal:** Build interface constraints as A·vec(X)=b.
 **File:** `model/interfaces.py`
@@ -75,7 +75,7 @@ Each WO stands alone, produces shippable code, and has acceptance checks against
 * Assembles mirror, period overlaps, concat ties, block overlaps as linear equalities.
 * Receipt: rank(A), #constraints.
 
-### WO-08 — D builder (CVXPY backend)
+### WO-08 — D builder (CVXPY backend) ✅ COMPLETE
 
 **Goal:** Compose one convex objective from invariants.
 **File:** `model/potential.py`
@@ -86,7 +86,7 @@ Each WO stands alone, produces shippable code, and has acceptance checks against
 * Reproduces **train** outputs with objective ≈ 0 (within penalty choice).
 * Receipt: DCP-valid flag; solver status/duality gap.
 
-### WO-09 — Convex solve
+### WO-09 — Convex solve 
 
 **Goal:** Solve one task via CVXPY once.
 **File:** `solvers/convex_one_shot.py`

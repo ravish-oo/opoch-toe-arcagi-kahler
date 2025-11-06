@@ -27,6 +27,7 @@ from arc_cloth.model.invariants import (
     ColorCountsInvariant
 )
 from arc_cloth.model.interfaces import build_interfaces
+from arc_cloth.model.potential import build_potential_cvxpy, evaluate_on_train
 
 
 @dataclass
@@ -239,6 +240,8 @@ def _stage_03_infer_invariants(
             "palette_size": counts_meta.get("palette_size", 0),
             "num_train_outputs": counts_meta.get("num_train_outputs", 0),
             "hash_counts": counts_meta.get("hash_counts", ""),
+            "stable_counts": counts_meta.get("stable_counts", False),
+            "stable_props": counts_meta.get("stable_props", False),
             # Periods receipts
             "period_h": periods.get("period_h"),
             "period_v": periods.get("period_v"),
@@ -379,6 +382,20 @@ def _stage_04_build_potential(
         gamma = build_interfaces(invariants, H, W, C)
         gamma_meta = gamma.get("__meta__", {})
 
+        # Build D (WO-08)
+        A_gamma = gamma.get("A")
+        D_prog = build_potential_cvxpy(invariants, H, W, C, A_gamma)
+        D_meta = D_prog.get("__meta__", {})
+
+        # Train reproduction check: evaluate D on each train output
+        train_D_values = []
+        for pair in task["train"]:
+            train_grid = np.asarray(pair["output"], dtype=np.int16)
+            # Only evaluate if dimensions match
+            if train_grid.shape == (H, W):
+                D_val = evaluate_on_train(train_grid, invariants, A_gamma)
+                train_D_values.append(D_val)
+
         details = {
             # Gamma receipts
             "gamma_M": gamma_meta.get("M", 0),
@@ -387,8 +404,15 @@ def _stage_04_build_potential(
             "gamma_shape": gamma_meta.get("shape", [0, 0]),
             "gamma_term_counts": gamma_meta.get("term_counts", {}),
             "gamma_hash_A": gamma_meta.get("hash_A", ""),
-            # D is not yet implemented (WO-08)
-            "D_status": "not_implemented",
+            # D receipts (WO-08)
+            "D_dcp_ok": D_meta.get("dcp_ok", False),
+            "D_num_terms": D_meta.get("num_terms", 0),
+            "D_num_constraints": D_meta.get("num_constraints", 0),
+            "D_term_weights": D_meta.get("term_weights", {}),
+            "D_solver_default": D_meta.get("solver_default", ""),
+            "D_train_values": train_D_values,
+            "D_train_mean": float(np.mean(train_D_values)) if train_D_values else 0.0,
+            "D_train_max": float(np.max(train_D_values)) if train_D_values else 0.0,
         }
 
         receipt = StageReceipt(
@@ -398,7 +422,7 @@ def _stage_04_build_potential(
             details=details,
         )
 
-        return receipt, None, gamma  # D_terms still None (WO-08)
+        return receipt, D_prog, gamma
 
     except Exception as e:
         return (
