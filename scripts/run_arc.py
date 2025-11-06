@@ -192,6 +192,11 @@ def main():
         action="store_true",
         help="Print detailed receipts for each task",
     )
+    parser.add_argument(
+        "--check-gamma",
+        action="store_true",
+        help="Output Gamma-specific CSV for interface constraint analysis",
+    )
 
     args = parser.parse_args()
 
@@ -320,6 +325,77 @@ def main():
                 )
 
         print(f"\nCSV saved to: {csv_path}")
+
+    # Save Gamma-specific CSV if --check-gamma requested
+    if args.check_gamma:
+        gamma_csv_path = Path(args.csv if args.csv else "gamma_check.csv")
+        if args.csv:
+            # If --csv is also set, use different name for Gamma CSV
+            gamma_csv_path = gamma_csv_path.with_name(gamma_csv_path.stem + "_gamma.csv")
+
+        with gamma_csv_path.open("w", newline="") as f:
+            writer = csv.DictWriter(
+                f,
+                fieldnames=[
+                    "task_id",
+                    "status",
+                    "M",
+                    "rank",
+                    "density",
+                    "shape",
+                    "period_h",
+                    "period_v",
+                    "mirror_h",
+                    "mirror_v",
+                    "concat_axes",
+                    "term_counts",
+                ],
+            )
+            writer.writeheader()
+
+            for r in results:
+                # Extract Gamma receipts from stage 04
+                stage04 = next((rec for rec in r.receipts if rec.stage == "04_build_potential"), None)
+
+                if stage04 and stage04.status == "ok":
+                    details = stage04.details
+                    term_counts = details.get("gamma_term_counts", {})
+
+                    writer.writerow({
+                        "task_id": r.task_id,
+                        "status": r.status,
+                        "M": details.get("gamma_M", 0),
+                        "rank": details.get("gamma_rank", ""),
+                        "density": f"{details.get('gamma_density', 0.0):.6f}",
+                        "shape": str(details.get("gamma_shape", [0, 0])),
+                        "period_h": term_counts.get("period_h", 0),
+                        "period_v": term_counts.get("period_v", 0),
+                        "mirror_h": term_counts.get("mirror_h", 0),
+                        "mirror_v": term_counts.get("mirror_v", 0),
+                        "concat_axes": ";".join([
+                            f"h:{term_counts.get('concat_h', 0)}",
+                            f"v:{term_counts.get('concat_v', 0)}"
+                        ]),
+                        "term_counts": json.dumps(term_counts),
+                    })
+                else:
+                    # Task didn't reach stage 04 or failed
+                    writer.writerow({
+                        "task_id": r.task_id,
+                        "status": r.status,
+                        "M": 0,
+                        "rank": "",
+                        "density": "0.0",
+                        "shape": "[0, 0]",
+                        "period_h": 0,
+                        "period_v": 0,
+                        "mirror_h": 0,
+                        "mirror_v": 0,
+                        "concat_axes": "h:0;v:0",
+                        "term_counts": "{}",
+                    })
+
+        print(f"\nGamma CSV saved to: {gamma_csv_path}")
 
     # Exit code
     error_count = status_counts.get("error", 0)

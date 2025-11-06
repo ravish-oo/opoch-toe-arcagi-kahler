@@ -138,11 +138,13 @@ def build_interfaces(inv: Dict[str, Any], H: int, W: int, C: int) -> Dict[str, A
                 row_id = _tie_pair(rows, cols, data, row_id, i, j, i + q, j, C, H, W)
                 term_counts["period_v"] += C
 
-    # 3) Horizontal mirror seams (column seams)
+    # 3) Horizontal mirror seams (column seams at midline)
     symmetries_meta = symmetries.get("__meta__", {})
     mirror_h_seams = symmetries_meta.get("mirror_h_seams", [])
 
-    for j0 in mirror_h_seams:
+    # Interpret "mid" as midline position W//2 (requires W even)
+    if "mid" in mirror_h_seams and W % 2 == 0:
+        j0 = W // 2
         w = min(j0, W - j0)
         for i in range(H):
             for t in range(w):
@@ -151,10 +153,12 @@ def build_interfaces(inv: Dict[str, Any], H: int, W: int, C: int) -> Dict[str, A
                 )
                 term_counts["mirror_h"] += C
 
-    # 4) Vertical mirror seams (row seams)
+    # 4) Vertical mirror seams (row seams at midline)
     mirror_v_seams = symmetries_meta.get("mirror_v_seams", [])
 
-    for i0 in mirror_v_seams:
+    # Interpret "mid" as midline position H//2 (requires H even)
+    if "mid" in mirror_v_seams and H % 2 == 0:
+        i0 = H // 2
         h = min(i0, H - i0)
         for j in range(W):
             for t in range(h):

@@ -539,12 +539,10 @@ def infer_symmetries(train: List[Dict[str, List[List[int]]]]) -> Dict[str, Any]:
     per_grid = []
     n_square = 0
     n_rect = 0
-    all_h_seams = []
-    all_v_seams = []
 
     # Track: do ALL outputs satisfy each condition?
-    all_have_h_seam = True
-    all_have_v_seam = True
+    all_have_mirror_h = True
+    all_have_mirror_v = True
     all_have_concat_h = True
     all_have_concat_v = True
 
@@ -556,34 +554,39 @@ def infer_symmetries(train: List[Dict[str, List[List[int]]]]) -> Dict[str, Any]:
         else:
             n_rect += 1
 
-        # Detect seams and concats for this grid
-        h_seams = _mirror_h_seams(G)
-        v_seams = _mirror_v_seams(G)
+        # Check midline mirrors (exact equal-halves only)
+        # Horizontal mirror: W must be even, left half = flipped right half
+        mirror_h_ok = (W % 2 == 0) and np.array_equal(
+            G[:, :W//2], np.fliplr(G[:, W//2:])
+        )
+
+        # Vertical mirror: H must be even, top half = flipped bottom half
+        mirror_v_ok = (H % 2 == 0) and np.array_equal(
+            G[:H//2, :], np.flipud(G[H//2:, :])
+        )
+
+        # Concat checks
         concat_h = _concat_h(G)
         concat_v = _concat_v(G)
 
         # Update task-level flags (require ALL outputs to satisfy)
-        all_have_h_seam &= bool(h_seams)  # has at least one h-seam
-        all_have_v_seam &= bool(v_seams)  # has at least one v-seam
+        all_have_mirror_h &= mirror_h_ok
+        all_have_mirror_v &= mirror_v_ok
         all_have_concat_h &= concat_h
         all_have_concat_v &= concat_v
-
-        # Collect all seams for receipts
-        all_h_seams.extend(h_seams)
-        all_v_seams.extend(v_seams)
 
         per_grid.append({
             "shape": [int(H), int(W)],
             "group": group,
-            "mirror_h_seams": h_seams,
-            "mirror_v_seams": v_seams,
+            "mirror_h_midline_ok": mirror_h_ok,
+            "mirror_v_midline_ok": mirror_v_ok,
             "concat_h": concat_h,
             "concat_v": concat_v
         })
 
     # Task-level flags
-    mirror_h = bool(all_have_h_seam)
-    mirror_v = bool(all_have_v_seam)
+    mirror_h = bool(all_have_mirror_h)
+    mirror_v = bool(all_have_mirror_v)
     concat_axes = []
     if all_have_concat_h:
         concat_axes.append("h")
@@ -600,22 +603,31 @@ def infer_symmetries(train: List[Dict[str, List[List[int]]]]) -> Dict[str, Any]:
             # Square: D4 check - 90° rotation should swap H↔V properties
             G90 = np.rot90(G, 1)
 
-            # Detect properties on both G and G90
-            h_seams_G = _mirror_h_seams(G)
-            v_seams_G = _mirror_v_seams(G)
-            h_seams_G90 = _mirror_h_seams(G90)
-            v_seams_G90 = _mirror_v_seams(G90)
+            # Midline mirror checks on both G and G90
+            mirror_h_G = (W % 2 == 0) and np.array_equal(
+                G[:, :W//2], np.fliplr(G[:, W//2:])
+            )
+            mirror_v_G = (H % 2 == 0) and np.array_equal(
+                G[:H//2, :], np.flipud(G[H//2:, :])
+            )
+            mirror_h_G90 = (H % 2 == 0) and np.array_equal(
+                G90[:, :H//2], np.fliplr(G90[:, H//2:])
+            )
+            mirror_v_G90 = (W % 2 == 0) and np.array_equal(
+                G90[:W//2, :], np.flipud(G90[W//2:, :])
+            )
+
             concat_h_G = _concat_h(G)
             concat_v_G = _concat_v(G)
             concat_h_G90 = _concat_h(G90)
             concat_v_G90 = _concat_v(G90)
 
-            # H-seams on G should become V-seams on G90 (swap)
-            if bool(h_seams_G) != bool(v_seams_G90):
+            # H-mirror on G should become V-mirror on G90 (swap)
+            if mirror_h_G != mirror_v_G90:
                 free_ok = False
                 break
-            # V-seams on G should become H-seams on G90 (swap)
-            if bool(v_seams_G) != bool(h_seams_G90):
+            # V-mirror on G should become H-mirror on G90 (swap)
+            if mirror_v_G != mirror_h_G90:
                 free_ok = False
                 break
             # Concat H on G should become concat V on G90 (swap)
@@ -633,12 +645,26 @@ def infer_symmetries(train: List[Dict[str, List[List[int]]]]) -> Dict[str, Any]:
             # Rectangle: D2 check - 180° rotation should preserve properties (no swap)
             G2 = np.rot90(G, 2)
 
-            # H-seam existence should be preserved
-            if bool(_mirror_h_seams(G)) != bool(_mirror_h_seams(G2)):
+            # Midline mirror checks on both G and G2
+            mirror_h_G = (W % 2 == 0) and np.array_equal(
+                G[:, :W//2], np.fliplr(G[:, W//2:])
+            )
+            mirror_v_G = (H % 2 == 0) and np.array_equal(
+                G[:H//2, :], np.flipud(G[H//2:, :])
+            )
+            mirror_h_G2 = (W % 2 == 0) and np.array_equal(
+                G2[:, :W//2], np.fliplr(G2[:, W//2:])
+            )
+            mirror_v_G2 = (H % 2 == 0) and np.array_equal(
+                G2[:H//2, :], np.flipud(G2[H//2:, :])
+            )
+
+            # H-mirror existence should be preserved
+            if mirror_h_G != mirror_h_G2:
                 free_ok = False
                 break
-            # V-seam existence should be preserved
-            if bool(_mirror_v_seams(G)) != bool(_mirror_v_seams(G2)):
+            # V-mirror existence should be preserved
+            if mirror_v_G != mirror_v_G2:
                 free_ok = False
                 break
             # Concat properties should be preserved
@@ -650,21 +676,27 @@ def infer_symmetries(train: List[Dict[str, List[List[int]]]]) -> Dict[str, Any]:
                 break
 
     # Generate receipts
+    # Return symbolic "mid" for midline mirrors
+    mirror_h_seams = ["mid"] if mirror_h else []
+    mirror_v_seams = ["mid"] if mirror_v else []
+
     meta = {
         "per_grid": per_grid,
         "free_invariance_ok": bool(free_ok),
         "n_outputs": len(outs),
         "n_square": int(n_square),
         "n_rect": int(n_rect),
-        "n_h_seams": len(all_h_seams),
-        "n_v_seams": len(all_v_seams),
+        "n_h_seams": 1 if mirror_h else 0,
+        "n_v_seams": 1 if mirror_v else 0,
+        "mirror_h_seams": mirror_h_seams,
+        "mirror_v_seams": mirror_v_seams,
         "hash_sym": hashlib.sha256(
             "|".join([
                 str(mirror_h),
                 str(mirror_v),
                 ",".join(concat_axes),
-                str(sorted(all_h_seams)),
-                str(sorted(all_v_seams))
+                ",".join(mirror_h_seams),
+                ",".join(mirror_v_seams)
             ]).encode()
         ).hexdigest(),
         "method": {
@@ -678,8 +710,8 @@ def infer_symmetries(train: List[Dict[str, List[List[int]]]]) -> Dict[str, Any]:
     return {
         "mirror_h": mirror_h,
         "mirror_v": mirror_v,
-        "mirror_h_seams": sorted(all_h_seams),
-        "mirror_v_seams": sorted(all_v_seams),
+        "mirror_h_seams": mirror_h_seams,
+        "mirror_v_seams": mirror_v_seams,
         "concat_axes": concat_axes,
         "__meta__": meta
     }
