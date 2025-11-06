@@ -222,12 +222,22 @@ def infer_color_counts(
     counts_json = json.dumps(all_counts_list, sort_keys=True, separators=(',', ':'))
     hash_counts = hashlib.sha256(counts_json.encode('utf-8')).hexdigest()[:16]
 
+    # Compute SHA-256 hash of the actual target (WO-A1)
+    hash_target = None
+    if stable_counts and color_counts_stable is not None:
+        target_json = json.dumps(color_counts_stable, sort_keys=True, separators=(',', ':'))
+        hash_target = hashlib.sha256(target_json.encode('utf-8')).hexdigest()[:16]
+    elif stable_props and color_props_stable is not None:
+        target_json = json.dumps(color_props_stable, sort_keys=True, separators=(',', ':'))
+        hash_target = hashlib.sha256(target_json.encode('utf-8')).hexdigest()[:16]
+
     # Build receipts
     receipts = {
         "free_invariance_ok": free_invariance_ok,
         "per_grid_counts": per_grid_counts,
         "palette_size": palette_size,
         "hash_counts": hash_counts,
+        "hash_target": hash_target,
         "num_train_outputs": len(task["train"]),
         "stable_counts": stable_counts,
         "stable_props": stable_props,

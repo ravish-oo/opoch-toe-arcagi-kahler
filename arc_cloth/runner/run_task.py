@@ -241,6 +241,7 @@ def _stage_03_infer_invariants(
             "palette_size": counts_meta.get("palette_size", 0),
             "num_train_outputs": counts_meta.get("num_train_outputs", 0),
             "hash_counts": counts_meta.get("hash_counts", ""),
+            "hash_target": counts_meta.get("hash_target"),
             "stable_counts": counts_meta.get("stable_counts", False),
             "stable_props": counts_meta.get("stable_props", False),
             # Periods receipts
@@ -255,6 +256,8 @@ def _stage_03_infer_invariants(
             # Symmetries receipts
             "mirror_h": symmetries.get("mirror_h", False),
             "mirror_v": symmetries.get("mirror_v", False),
+            "mirror_h_seams": symmetries_meta.get("mirror_h_seams", []),
+            "mirror_v_seams": symmetries_meta.get("mirror_v_seams", []),
             "concat_axes": symmetries.get("concat_axes", []),
             "symmetries_free_ok": symmetries_meta.get("free_invariance_ok", False),
             "n_h_seams": symmetries_meta.get("n_h_seams", 0),

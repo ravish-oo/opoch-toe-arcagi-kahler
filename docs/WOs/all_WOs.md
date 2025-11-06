@@ -86,7 +86,7 @@ Each WO stands alone, produces shippable code, and has acceptance checks against
 * Reproduces **train** outputs with objective ≈ 0 (within penalty choice).
 * Receipt: DCP-valid flag; solver status/duality gap.
 
-### WO-09 — Convex solve 
+### WO-09 — Convex solve ✅ COMPLETE
 
 **Goal:** Solve one task via CVXPY once.
 **File:** `solvers/convex_one_shot.py`

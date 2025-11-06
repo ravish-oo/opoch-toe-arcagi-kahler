@@ -123,8 +123,12 @@ def print_receipt_summary(result: TaskResult) -> None:
                 print(f"    Period V: {details.get('period_v', 'None')} (stable={details.get('stable_v', False)}, conf={details.get('conf_v', 0.0):.2f})")
                 # Symmetries
                 print(f"    Symmetries FREE-ok: {details.get('symmetries_free_ok', 'N/A')}")
-                print(f"    Mirror H: {details.get('mirror_h', False)} ({details.get('n_h_seams', 0)} seams)")
-                print(f"    Mirror V: {details.get('mirror_v', False)} ({details.get('n_v_seams', 0)} seams)")
+                seams_h = details.get('mirror_h_seams', [])
+                seams_h_str = str(seams_h) if seams_h else "[]"
+                print(f"    Mirror H: {details.get('mirror_h', False)} (seams: {seams_h_str})")
+                seams_v = details.get('mirror_v_seams', [])
+                seams_v_str = str(seams_v) if seams_v else "[]"
+                print(f"    Mirror V: {details.get('mirror_v', False)} (seams: {seams_v_str})")
                 concat_axes = details.get('concat_axes', [])
                 concat_str = ", ".join(concat_axes) if concat_axes else "none"
                 print(f"    Concat axes: {concat_str}")
