@@ -26,6 +26,7 @@ from arc_cloth.model.invariants import (
     infer_block_codebook,
     ColorCountsInvariant
 )
+from arc_cloth.model.interfaces import build_interfaces
 
 
 @dataclass
@@ -348,25 +349,68 @@ def _stage_04_build_potential(
     invariants: Optional[Dict[str, Any]], task: Task, metadata: TaskMetadata
 ) -> tuple[StageReceipt, Optional[Any], Optional[Any]]:
     """
-    Stage 4: Build convex potential D and interfaces Γ (WO-08-09, stub for now).
+    Stage 4: Build convex potential D and interfaces Γ (WO-07-09).
 
     Returns (receipt, D_terms, Gamma_constraints).
     """
     t0 = time.time()
 
-    # TODO (WO-08-09): Build CVXPY-compatible D and Γ
-    # - Convert invariants to DCP-compliant convex terms
-    # - Build linear equalities for Γ
-    # - Verify DCP compliance
+    try:
+        if invariants is None:
+            return (
+                StageReceipt(
+                    stage="04_build_potential",
+                    status="skip",
+                    time_s=time.time() - t0,
+                    details={"reason": "No invariants available"},
+                ),
+                None,
+                None,
+            )
 
-    receipt = StageReceipt(
-        stage="04_build_potential",
-        status="skip",
-        time_s=time.time() - t0,
-        details={"reason": "WO-08-09 not yet implemented"},
-    )
+        # Get dimensions from first train output (for probe/testing)
+        # For actual solving, use test input dimensions
+        first_output = task["train"][0]["output"]
+        H = len(first_output)
+        W = len(first_output[0]) if H > 0 else 0
+        C = 10  # ARC colors 0-9
 
-    return receipt, None, None
+        # Build Gamma (WO-07)
+        gamma = build_interfaces(invariants, H, W, C)
+        gamma_meta = gamma.get("__meta__", {})
+
+        details = {
+            # Gamma receipts
+            "gamma_M": gamma_meta.get("M", 0),
+            "gamma_rank": gamma_meta.get("rank"),
+            "gamma_density": gamma_meta.get("density", 0.0),
+            "gamma_shape": gamma_meta.get("shape", [0, 0]),
+            "gamma_term_counts": gamma_meta.get("term_counts", {}),
+            "gamma_hash_A": gamma_meta.get("hash_A", ""),
+            # D is not yet implemented (WO-08)
+            "D_status": "not_implemented",
+        }
+
+        receipt = StageReceipt(
+            stage="04_build_potential",
+            status="ok",
+            time_s=time.time() - t0,
+            details=details,
+        )
+
+        return receipt, None, gamma  # D_terms still None (WO-08)
+
+    except Exception as e:
+        return (
+            StageReceipt(
+                stage="04_build_potential",
+                status="error",
+                time_s=time.time() - t0,
+                error=f"{type(e).__name__}: {e}",
+            ),
+            None,
+            None,
+        )
 
 
 def _stage_05_solve_convex(

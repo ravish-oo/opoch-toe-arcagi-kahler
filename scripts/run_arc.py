@@ -135,6 +135,20 @@ def print_receipt_summary(result: TaskResult) -> None:
                     print(f"    Blocks: {details.get('n_blocks_total', 0)}, coverage={details.get('coverage', 0.0):.2f}")
                 else:
                     print(f"    Block size: None (no valid k)")
+            elif receipt.stage == "04_build_potential":
+                details = receipt.details
+                # Gamma receipts
+                print(f"    Γ constraints (M): {details.get('gamma_M', 0)}")
+                print(f"    Γ rank: {details.get('gamma_rank', 'N/A')}")
+                print(f"    Γ density: {details.get('gamma_density', 0.0):.6f}")
+                print(f"    Γ shape: {details.get('gamma_shape', [0, 0])}")
+                term_counts = details.get('gamma_term_counts', {})
+                print(f"    Term counts:")
+                for term, count in sorted(term_counts.items()):
+                    if count > 0:
+                        print(f"      {term}: {count}")
+                # D status
+                print(f"    D status: {details.get('D_status', 'unknown')}")
 
 
 def main():
