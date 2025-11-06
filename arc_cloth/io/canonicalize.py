@@ -31,40 +31,25 @@ class CanonicalTask(dict):
     pass
 
 
-# D4 transform names for the 8 elements
-D4_NAMES = [
-    "R0",      # identity
-    "R90",     # rotate 90 ccw
-    "R180",    # rotate 180
-    "R270",    # rotate 270 ccw
-    "Fh_R0",   # flip horizontal
-    "Fh_R90",  # flip horizontal then rotate 90
-    "Fh_R180", # flip horizontal then rotate 180
-    "Fh_R270", # flip horizontal then rotate 270
+# D4 group for squares: 8 transforms using production-grade numpy operations
+# Order matches dihedral group structure: rotations first, then reflections
+D4 = [
+    lambda a: a,                          # R0:   identity
+    lambda a: np.rot90(a, 1),            # R90:  rotate 90° CCW
+    lambda a: np.rot90(a, 2),            # R180: rotate 180°
+    lambda a: np.rot90(a, 3),            # R270: rotate 270° CCW (= 90° CW)
+    lambda a: np.flip(a, 0),             # Fv:   flip vertical (rows)
+    lambda a: np.flip(a, 1),             # Fh:   flip horizontal (columns)
+    lambda a: np.flip(np.rot90(a, 1), 0),# Fd1:  diagonal flip (\ diagonal)
+    lambda a: np.flip(np.rot90(a, 1), 1),# Fd2:  diagonal flip (/ diagonal)
 ]
 
+# D2 group for rectangles: 4 shape-preserving transforms (subset of D4)
+# Excludes R90 and R270 which change H×W ↔ W×H
+D2_INDICES = [0, 2, 4, 5]  # R0, R180, Fv, Fh
 
-def _apply_d4_transform(grid: np.ndarray, transform_idx: int) -> np.ndarray:
-    """
-    Apply one of the 8 D4 transforms to a grid.
-
-    Args:
-        grid: 2D numpy array
-        transform_idx: 0-7 index into D4 group
-
-    Returns:
-        Transformed grid as numpy array.
-    """
-    # First 4: pure rotations (k=0,1,2,3)
-    # Last 4: flip horizontal then rotate (k=0,1,2,3)
-
-    if transform_idx < 4:
-        # Pure rotation
-        return np.rot90(grid, k=transform_idx)
-    else:
-        # Flip horizontal then rotate
-        k = transform_idx - 4
-        return np.rot90(np.fliplr(grid), k=k)
+# Transform names for receipts
+D4_NAMES = ["R0", "R90", "R180", "R270", "Fv", "Fh", "Fd1", "Fd2"]
 
 
 def _grid_to_bytes(grid: np.ndarray) -> bytes:
@@ -79,7 +64,7 @@ def _canonicalize_grid_pose(grid: Grid) -> Tuple[Grid, int]:
     SHAPE-AWARE CANONICALIZATION:
     - Squares (H==W): Use D4 (8 transforms) - full dihedral group
     - Rectangles (H≠W): Use D2 (4 transforms) - shape-preserving only
-      D2 = {R0, R180, Fh, Fv} (indices 0, 2, 4, 6)
+      D2 = {R0, R180, Fv, Fh} (indices 0, 2, 4, 5)
 
     Returns (canonical_grid, chosen_transform_idx).
     The canonical grid is the lexicographically minimal byte representation
@@ -91,16 +76,16 @@ def _canonicalize_grid_pose(grid: Grid) -> Tuple[Grid, int]:
     # Determine transform set based on shape
     if H == W:
         # Square: use full D4 (8 transforms)
-        transform_indices = [0, 1, 2, 3, 4, 5, 6, 7]
+        transform_indices = list(range(8))
     else:
         # Rectangle: use D2 only (4 shape-preserving transforms)
-        # R0 (identity), R180, Fh (horizontal flip), Fv (vertical flip)
-        transform_indices = [0, 2, 4, 6]
+        # R0, R180, Fv, Fh (indices from D2_INDICES)
+        transform_indices = D2_INDICES
 
-    # Generate transforms and their byte keys
+    # Generate transforms and their byte keys using numpy operations directly
     candidates = []
     for i in transform_indices:
-        transformed = _apply_d4_transform(grid_np, i)
+        transformed = D4[i](grid_np)  # Apply transform via numpy lambda
         byte_key = _grid_to_bytes(transformed)
         candidates.append((byte_key, transformed, i))
 
@@ -204,32 +189,34 @@ def _get_task_valid_transforms(task: Dict[str, Any]) -> List[int]:
 
     if all_square:
         # All grids are square: test all D4 transforms
-        return [0, 1, 2, 3, 4, 5, 6, 7]
+        return list(range(8))
     else:
         # At least one rectangular grid: test only D2 (shape-preserving)
-        return [0, 2, 4, 6]
+        return D2_INDICES
 
 
 def _apply_d4_to_task(task: Dict[str, Any], transform_idx: int) -> Dict[str, Any]:
     """
     Apply a D4 transform to all grids in a task.
 
+    Uses numpy operations directly via D4 lambda list.
     Used for orbit collapse testing.
     """
     transformed = deepcopy(task)
+    transform = D4[transform_idx]  # Get numpy lambda directly
 
     # Transform all train grids
     for pair in transformed["train"]:
         grid_np = np.array(pair["input"], dtype=np.int32)
-        pair["input"] = _apply_d4_transform(grid_np, transform_idx).tolist()
+        pair["input"] = transform(grid_np).tolist()
 
         grid_np = np.array(pair["output"], dtype=np.int32)
-        pair["output"] = _apply_d4_transform(grid_np, transform_idx).tolist()
+        pair["output"] = transform(grid_np).tolist()
 
     # Transform test grids
     for pair in transformed["test"]:
         grid_np = np.array(pair["input"], dtype=np.int32)
-        pair["input"] = _apply_d4_transform(grid_np, transform_idx).tolist()
+        pair["input"] = transform(grid_np).tolist()
 
     return transformed
 
