@@ -28,6 +28,7 @@ from arc_cloth.model.invariants import (
 )
 from arc_cloth.model.interfaces import build_interfaces
 from arc_cloth.model.potential import build_potential_cvxpy, evaluate_on_train
+from arc_cloth.solvers.convex_one_shot import solve_convex
 
 
 @dataclass
@@ -444,26 +445,66 @@ def _stage_05_solve_convex(
     metadata: TaskMetadata,
 ) -> tuple[StageReceipt, Optional[np.ndarray]]:
     """
-    Stage 5: Solve via CVXPY (WO-10, stub for now).
+    Stage 5: Solve via CVXPY (WO-09).
 
-    Returns (receipt, solution_grid).
+    Returns (receipt, X_prob).
     """
     t0 = time.time()
 
-    # TODO (WO-10): Solve convex program
-    # - Build CVXPY problem with D + Γ
-    # - Solve with cone/QP/SOCP solver
-    # - Check solver status and duality gap (FY receipt)
-    # - Return relaxed solution (pre-snap)
+    try:
+        if D_terms is None or Gamma is None:
+            return (
+                StageReceipt(
+                    stage="05_solve_convex",
+                    status="skip",
+                    time_s=time.time() - t0,
+                    details={"reason": "No D_terms or Gamma available"},
+                ),
+                None,
+            )
 
-    receipt = StageReceipt(
-        stage="05_solve_convex",
-        status="skip",
-        time_s=time.time() - t0,
-        details={"reason": "WO-10 not yet implemented"},
-    )
+        # Get dimensions from first train output
+        first_output = task["train"][0]["output"]
+        H = len(first_output)
+        W = len(first_output[0]) if H > 0 else 0
+        C = 10  # ARC colors 0-9
 
-    return receipt, None
+        # Assemble full program dict: add A_gamma to D_prog
+        prog = {**D_terms, "A_gamma": Gamma.get("A")}
+
+        # Solve (WO-09)
+        X_prob, solve_receipts = solve_convex(H, W, C, prog, solver="CLARABEL")
+
+        # Assemble details from solver receipts
+        details = {
+            "status": solve_receipts["status"],
+            "optimal_value": solve_receipts["optimal_value"],
+            "duality_gap": solve_receipts["duality_gap"],
+            "eq_residual_max": solve_receipts["eq_residual_max"],
+            "simplex_residual_max": solve_receipts["simplex_residual_max"],
+            "solver_name": solve_receipts["solver_name"],
+            "solve_time_s": solve_receipts["solve_time_s"],
+        }
+
+        receipt = StageReceipt(
+            stage="05_solve_convex",
+            status="ok",
+            time_s=time.time() - t0,
+            details=details,
+        )
+
+        return receipt, X_prob
+
+    except Exception as e:
+        return (
+            StageReceipt(
+                stage="05_solve_convex",
+                status="error",
+                time_s=time.time() - t0,
+                details={"error": str(e)},
+            ),
+            None,
+        )
 
 
 def _stage_06_solve_cloth(

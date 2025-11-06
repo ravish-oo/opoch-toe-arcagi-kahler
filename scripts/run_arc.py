@@ -158,6 +158,20 @@ def print_receipt_summary(result: TaskResult) -> None:
                 train_vals = details.get('D_train_values', [])
                 if train_vals:
                     print(f"    D train reproduction: mean={details.get('D_train_mean', 0):.6f}, max={details.get('D_train_max', 0):.6f}")
+            elif receipt.stage == "05_solve_convex":
+                details = receipt.details
+                # Solver receipts (WO-09)
+                print(f"    Solver: {details.get('solver_name', 'N/A')}")
+                print(f"    Status: {details.get('status', 'N/A')}")
+                opt_val = details.get('optimal_value')
+                if opt_val is not None:
+                    print(f"    Optimal value: {opt_val:.6f}")
+                gap = details.get('duality_gap')
+                if gap is not None:
+                    print(f"    Duality gap: {gap:.6e}")
+                print(f"    Eq residual (max): {details.get('eq_residual_max', 0):.6e}")
+                print(f"    Simplex residual (max): {details.get('simplex_residual_max', 0):.6e}")
+                print(f"    Solve time: {details.get('solve_time_s', 0):.4f}s")
 
 
 def main():
