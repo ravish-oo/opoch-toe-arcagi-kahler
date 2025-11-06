@@ -111,6 +111,16 @@ def print_receipt_summary(result: TaskResult) -> None:
                 palette_map = details.get('palette_map', {})
                 if palette_map:
                     print(f"    Palette map: {palette_map}")
+            elif receipt.stage == "03_infer_invariants":
+                details = receipt.details
+                print(f"    FREE-invariant: {details.get('free_invariance_ok', 'N/A')}")
+                print(f"    Palette size: {details.get('palette_size', 0)}")
+                print(f"    Train outputs: {details.get('num_train_outputs', 0)}")
+                print(f"    Hash: {details.get('hash_counts', 'N/A')}")
+                # Show first grid counts as example
+                per_grid = details.get('per_grid_counts', [])
+                if per_grid:
+                    print(f"    Example counts: {per_grid[0].get('counts', {})}")
 
 
 def main():

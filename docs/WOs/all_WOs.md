@@ -13,7 +13,7 @@ Each WO stands alone, produces shippable code, and has acceptance checks against
 * Fails fast on malformed JSON.
 * Receipt: “format OK” flag and shape summary.
 
-### WO-02 — Canonicalizer (Π idempotence)
+### WO-02 — Canonicalizer (Π idempotence) ✅ COMPLETE
 
 **Goal:** D4 pose + palette canonicalization.
 **File:** `io/canonicalize.py`
@@ -24,7 +24,7 @@ Each WO stands alone, produces shippable code, and has acceptance checks against
 * D4 transforms are recognized; palette remapped to contiguous [0..C-1].
 * Receipt: hash before/after; record chosen pose.
 
-### WO-03 — Invariants: color counts
+### WO-03 — Invariants: color counts ✅ COMPLETE
 
 **Goal:** Extract per-color totals from train outputs.
 **File:** `model/invariants.py`

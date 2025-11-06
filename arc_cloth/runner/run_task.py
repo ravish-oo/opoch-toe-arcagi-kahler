@@ -19,6 +19,7 @@ import numpy as np
 
 from arc_cloth.io.arc_loader import Grid, Task, TaskMetadata, load_task
 from arc_cloth.io.canonicalize import canonicalize_task, CanonicalTask
+from arc_cloth.model.invariants import infer_color_counts, ColorCountsInvariant
 
 
 @dataclass
@@ -191,28 +192,73 @@ def _stage_03_infer_invariants(
     task: Task, metadata: TaskMetadata
 ) -> tuple[StageReceipt, Optional[Dict[str, Any]]]:
     """
-    Stage 3: Infer invariants from train pairs (WO-03-07, stub for now).
+    Stage 3: Infer invariants from train pairs (WO-03+).
+
+    Currently implements:
+    - Color counts (WO-03) ✓
+
+    Future WOs:
+    - Tiling/periodicity (WO-04)
+    - Mirrors/reflections (WO-05)
+    - Component mappings (WO-06)
+    - Block substitutions (WO-07)
 
     Returns (receipt, invariants_dict).
     """
     t0 = time.time()
 
-    # TODO (WO-03-07): Detect and extract invariants
-    # - Color histograms
-    # - Tiling/periodicity
-    # - Mirrors/reflections
-    # - Component mappings
-    # - Block substitutions
-    # - Line/border consistency
+    try:
+        # WO-03: Extract color counts from train outputs
+        color_counts = infer_color_counts(task)
 
-    receipt = StageReceipt(
-        stage="03_infer_invariants",
-        status="skip",
-        time_s=time.time() - t0,
-        details={"reason": "WO-03-07 not yet implemented"},
-    )
+        # Extract receipts
+        counts_meta = color_counts.get("__meta__", {})
 
-    return receipt, None
+        details = {
+            "free_invariance_ok": counts_meta.get("free_invariance_ok", False),
+            "palette_size": counts_meta.get("palette_size", 0),
+            "num_train_outputs": counts_meta.get("num_train_outputs", 0),
+            "hash_counts": counts_meta.get("hash_counts", ""),
+            "per_grid_counts": counts_meta.get("per_grid_counts", []),
+        }
+
+        # Verify FREE-invariance
+        if not counts_meta.get("free_invariance_ok", False):
+            return (
+                StageReceipt(
+                    stage="03_infer_invariants",
+                    status="error",
+                    time_s=time.time() - t0,
+                    error="Color counts not FREE-invariant",
+                    details=details,
+                ),
+                None,
+            )
+
+        # Build invariants dict
+        invariants = {
+            "color_counts": color_counts,
+        }
+
+        receipt = StageReceipt(
+            stage="03_infer_invariants",
+            status="ok",
+            time_s=time.time() - t0,
+            details=details,
+        )
+
+        return receipt, invariants
+
+    except Exception as e:
+        return (
+            StageReceipt(
+                stage="03_infer_invariants",
+                status="error",
+                time_s=time.time() - t0,
+                error=f"{type(e).__name__}: {e}",
+            ),
+            None,
+        )
 
 
 def _stage_04_build_potential(
